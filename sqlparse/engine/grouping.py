@@ -264,6 +264,19 @@ def group_over(tlist):
         tidx, token = tlist.token_next_by(m=sql.Over.M_OPEN, idx=tidx)
 
 
+@recurse(sql.WithinGroup)
+def group_within_group(tlist):
+    tidx, token = tlist.token_next_by(m=sql.WithinGroup.M_OPEN)
+    while token:
+        group_idx, group_kw = tlist.token_next(tidx)
+        if group_kw and group_kw.match(T.Keyword, 'GROUP'):
+            paren_idx, paren = tlist.token_next(group_idx)
+            if isinstance(paren, sql.Parenthesis):
+                tlist.group_tokens(sql.WithinGroup, tidx, paren_idx)
+        tidx, token = tlist.token_next_by(
+            m=sql.WithinGroup.M_OPEN, idx=tidx)
+
+
 def group_arrays(tlist):
     sqlcls = sql.SquareBrackets, sql.Identifier, sql.Function
     ttypes = T.Name, T.String.Symbol
@@ -395,9 +408,9 @@ def group_functions(tlist):
     while token:
         nidx, next_ = tlist.token_next(tidx)
         if isinstance(next_, sql.Parenthesis):
-            over_idx, over = tlist.token_next(nidx)
-            if over and isinstance(over, sql.Over):
-                eidx = over_idx
+            suffix_idx, suffix = tlist.token_next(nidx)
+            if suffix and isinstance(suffix, (sql.Over, sql.WithinGroup)):
+                eidx = suffix_idx
             else:
                 eidx = nidx
             tlist.group_tokens(sql.Function, tidx, eidx)
@@ -452,6 +465,7 @@ def group(stmt):
         group_begin,
 
         group_over,
+        group_within_group,
         group_functions,
         group_where,
         group_period,

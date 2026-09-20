@@ -567,6 +567,12 @@ class Over(TokenList):
     M_OPEN = T.Keyword, 'OVER'
 
 
+class WithinGroup(TokenList):
+    """A WITHIN GROUP clause."""
+
+    M_OPEN = T.Keyword, 'WITHIN'
+
+
 class Having(TokenList):
     """A HAVING clause."""
     M_OPEN = T.Keyword, 'HAVING'

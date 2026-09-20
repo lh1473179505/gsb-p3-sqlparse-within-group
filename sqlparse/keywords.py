@@ -720,6 +720,7 @@ KEYWORDS = {
     'WEEK': tokens.Keyword,
     'WHENEVER': tokens.Keyword,
     'WITH': tokens.Keyword.CTE,
+    'WITHIN': tokens.Keyword,
     'WITHOUT': tokens.Keyword,
     'WORK': tokens.Keyword,
     'WRITE': tokens.Keyword,

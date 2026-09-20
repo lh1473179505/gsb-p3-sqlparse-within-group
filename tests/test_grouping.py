@@ -194,6 +194,69 @@ def test_grouping_identifier_function():
                       sql.Parenthesis)
 
 
+def _iter_groups(tlist):
+    for token in tlist.tokens:
+        if token.is_group:
+            yield token
+            yield from _iter_groups(token)
+
+
+def test_grouping_within_group_ordered_set_aggregates():
+    s = ("SELECT LISTAGG(attr, ', ') WITHIN GROUP (ORDER BY attr) AS column,"
+         "\n       percentile_cont(0.5) WITHIN GROUP (ORDER BY metric) AS p50,"
+         "\n       other_col"
+         "\nFROM table")
+
+    for statement in (s, sqlparse.format(s, reindent=True)):
+        p = sqlparse.parse(statement)[0]
+        _, identifier_list = p.token_next_by(i=sql.IdentifierList)
+        identifiers = list(identifier_list.get_identifiers())
+
+        assert len(identifiers) == 3
+        assert [identifier.get_alias() for identifier in identifiers] == [
+            'column', 'p50', None]
+
+        for identifier in identifiers[:2]:
+            function = identifier.tokens[0]
+            assert isinstance(function, sql.Function)
+            _, within_group = function.token_next_by(i=sql.WithinGroup)
+            assert within_group is not None
+            assert isinstance(within_group.tokens[-1], sql.Parenthesis)
+
+        assert not any(token.match(T.Keyword, 'GROUP') for token in p.tokens)
+        assert not any(
+            isinstance(group, sql.Identifier)
+            and str(group).upper().endswith('WITHIN')
+            and 'GROUP' not in str(group).upper()
+            for group in _iter_groups(p))
+
+
+def test_grouping_within_group_without_alias():
+    s = 'select percentile_cont(0.5) within group (order by a) from t'
+    p = sqlparse.parse(s)[0]
+
+    function = p.tokens[2]
+    assert isinstance(function, sql.Function)
+    assert str(function) == 'percentile_cont(0.5) within group (order by a)'
+    _, within_group = function.token_next_by(i=sql.WithinGroup)
+    assert within_group is not None
+    assert isinstance(within_group.tokens[-1], sql.Parenthesis)
+
+
+def test_grouping_within_group_leaves_related_clauses_untouched():
+    p = sqlparse.parse('select x from t group by x')[0]
+    assert p.tokens[8].match(T.Keyword, 'GROUP BY')
+
+    p = sqlparse.parse('select sum(x) over (order by y) from t')[0]
+    assert isinstance(p.tokens[2], sql.Function)
+    assert isinstance(p.tokens[2].tokens[-1], sql.Over)
+
+    p = sqlparse.parse('select sum(x) filter (where x > 0) from t')[0]
+    assert isinstance(p.tokens[2], sql.Function)
+    assert isinstance(p.tokens[4], sql.Function)
+    assert p.tokens[4].tokens[0].get_real_name() == 'filter'
+
+
 @pytest.mark.parametrize('s', ['foo+100', 'foo + 100', 'foo*100'])
 def test_grouping_operation(s):
     p = sqlparse.parse(s)[0]
