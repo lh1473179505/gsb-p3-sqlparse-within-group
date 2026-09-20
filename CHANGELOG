@@ -1,7 +1,13 @@
 Development Version
 -------------------
 
-Nothing yet.
+Bug Fixes
+
+* Group ordered-set aggregates ``func(...) WITHIN GROUP (ORDER BY ...)``
+  (e.g. ``LISTAGG``, ``percentile_cont``) into a single column instead of
+  splitting at ``WITHIN``, so aliases attach to the whole aggregate and
+  the SELECT list reports the correct number of columns (issue #700).
+  ``WITHIN`` is now recognized as a keyword.
 
 
 Release 0.6.0 (Aug 13, 2026)

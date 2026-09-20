@@ -685,3 +685,97 @@ def test_grouping_as_cte():
 def test_grouping_create_table():
     p = sqlparse.parse("create table db.tbl (a string)")[0].tokens
     assert p[4].value == "db.tbl"
+
+
+def _select_identifiers(stmt):
+    """Returns the logical columns of the SELECT list of *stmt*."""
+    for token in stmt.tokens:
+        if isinstance(token, sql.IdentifierList):
+            return list(token.get_identifiers())
+        if isinstance(token, (sql.Identifier, sql.Function)):
+            return [token]
+    return []
+
+
+def test_within_group_ordered_set_aggregates():
+    # issue #700: WITHIN GROUP must not split the aggregate at WITHIN
+    stmt = sqlparse.parse(
+        "SELECT LISTAGG(attr, ', ') WITHIN GROUP (ORDER BY attr) AS column,"
+        "       percentile_cont(0.5) WITHIN GROUP (ORDER BY metric) AS p50,"
+        "       other_col"
+        " FROM table"
+    )[0]
+    columns = _select_identifiers(stmt)
+    assert len(columns) == 3
+    assert [col.get_alias() for col in columns] == ['column', 'p50', None]
+    for col in columns:
+        # no truncated identifier ending in WITHIN, and GROUP must be
+        # part of the aggregate, not a separate keyword at top level
+        assert not col.value.rstrip().upper().endswith('WITHIN')
+    assert 'WITHIN GROUP' in columns[0].value
+    assert 'WITHIN GROUP' in columns[1].value
+    # the whole aggregate (incl. WITHIN GROUP clause) is one column
+    assert isinstance(columns[0].tokens[0], sql.Function)
+    assert isinstance(columns[1].tokens[0], sql.Function)
+    assert columns[0].tokens[0].get_real_name() == 'LISTAGG'
+    assert columns[1].tokens[0].get_real_name() == 'percentile_cont'
+
+
+def test_within_group_without_alias():
+    stmt = sqlparse.parse(
+        'SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY a) FROM t'
+    )[0]
+    columns = _select_identifiers(stmt)
+    assert len(columns) == 1
+    func = columns[0]
+    assert isinstance(func, sql.Function)
+    assert func.value == \
+        'percentile_cont(0.5) WITHIN GROUP (ORDER BY a)'
+    assert func.get_real_name() == 'percentile_cont'
+    # consistent with unaliased window functions (OVER): the bare
+    # function name heuristic applies, but no trailing identifier
+    # is mistaken for an alias
+    assert func.get_name() == 'percentile_cont'
+
+
+def test_within_group_alias_without_as():
+    stmt = sqlparse.parse(
+        "SELECT LISTAGG(a, ', ') WITHIN GROUP (ORDER BY a) agg FROM t"
+    )[0]
+    columns = _select_identifiers(stmt)
+    assert len(columns) == 1
+    assert columns[0].get_alias() == 'agg'
+
+
+def test_within_group_format_roundtrip():
+    source = (
+        "SELECT LISTAGG(attr, ', ') WITHIN GROUP (ORDER BY attr) AS column,"
+        " percentile_cont(0.5) WITHIN GROUP (ORDER BY metric) AS p50,"
+        " other_col FROM table"
+    )
+    formatted = sqlparse.format(source, reindent=True)
+    columns = _select_identifiers(sqlparse.parse(formatted)[0])
+    assert len(columns) == 3
+    assert [col.get_alias() for col in columns] == ['column', 'p50', None]
+    for col in columns:
+        assert not col.value.rstrip().upper().endswith('WITHIN')
+
+
+def test_within_group_does_not_break_neighbors():
+    # plain GROUP BY stays untouched
+    stmt = sqlparse.parse('SELECT a, count(b) FROM t GROUP BY a')[0]
+    assert any(t.match(T.Keyword, 'GROUP BY') for t in stmt.tokens)
+    # window OVER (ORDER BY ...) stays untouched
+    stmt = sqlparse.parse(
+        'SELECT count(a) OVER (ORDER BY a) AS c FROM t')[0]
+    columns = _select_identifiers(stmt)
+    assert len(columns) == 1
+    assert columns[0].get_alias() == 'c'
+    assert isinstance(columns[0].tokens[0], sql.Function)
+    assert columns[0].tokens[0].get_window() is not None
+    # FILTER clause stays untouched
+    stmt = sqlparse.parse(
+        'SELECT sum(x) FILTER (WHERE x > 0) AS s FROM t')[0]
+    columns = _select_identifiers(stmt)
+    assert len(columns) == 1
+    assert columns[0].get_alias() == 's'

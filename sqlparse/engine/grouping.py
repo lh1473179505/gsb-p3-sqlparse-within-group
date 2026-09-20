@@ -416,6 +416,31 @@ def group_order(tlist):
         tidx, token = tlist.token_next_by(t=T.Keyword.Order, idx=tidx)
 
 
+@recurse(sql.Identifier)
+def group_within_group(tlist):
+    """Groups ordered-set aggregate ``WITHIN GROUP (...)`` clauses.
+
+    Ordered-set aggregates like ``LISTAGG(x) WITHIN GROUP (ORDER BY y)``
+    or ``percentile_cont(0.5) WITHIN GROUP (ORDER BY y)`` consist of a
+    regular function call followed by a ``WITHIN GROUP`` clause.  The
+    clause is folded into the preceding :class:`~sqlparse.sql.Function`
+    so that the whole aggregate is treated as a single column and
+    aliases attach to the aggregate as a whole (issue #700).
+    """
+    tidx, token = tlist.token_next_by(m=(T.Keyword, 'WITHIN'))
+    while token:
+        pidx, prev_ = tlist.token_prev(tidx)
+        if isinstance(prev_, sql.Function):
+            nidx, next_ = tlist.token_next(tidx)
+            if next_ is not None and next_.match(T.Keyword, 'GROUP'):
+                eidx, end = tlist.token_next(nidx)
+                if isinstance(end, sql.Parenthesis):
+                    tlist.group_tokens(sql.Function, pidx, eidx,
+                                       extend=True)
+                    tidx = pidx
+        tidx, token = tlist.token_next_by(m=(T.Keyword, 'WITHIN'), idx=tidx)
+
+
 @recurse()
 def align_comments(tlist):
     tidx, token = tlist.token_next_by(i=sql.Comment)
@@ -453,6 +478,7 @@ def group(stmt):
 
         group_over,
         group_functions,
+        group_within_group,
         group_where,
         group_period,
         group_arrays,
